@@ -8,35 +8,36 @@
 </head>
 <body style="margin:0;background:#faf6f0;">
   <div id="root"></div>
+
+  <!-- React -->
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- Firebase -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+    import { getFirestore, collection, doc, getDocs, setDoc, deleteDoc, query, orderBy } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+    import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+
+    window.FirebaseApp = { initializeApp };
+    window.FirebaseFirestore = { getFirestore, collection, doc, getDocs, setDoc, deleteDoc, query, orderBy };
+    window.FirebaseAuth = { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged };
+    window._firebaseReady = true;
+    window.dispatchEvent(new Event("firebase-ready"));
+  </script>
+
   <script type="text/babel" data-presets="react">
 
-
-// ── localStorage 헬퍼 ──
-const STORAGE_KEY = "bible_study_entries";
-
-async function storageGet(key) {
-  try {
-    const val = localStorage.getItem(key);
-    return val ? JSON.parse(val) : null;
-  } catch { return null; }
-}
-
-async function storageSet(key, value) {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-    return true;
-  } catch { return false; }
-}
-
-async function storageDelete(key) {
-  try {
-    localStorage.removeItem(key);
-    return true;
-  } catch { return false; }
-}
+// ── Firebase Config ──
+const firebaseConfig = {
+  apiKey: "AIzaSyDxvHOztDG3hYYTq9lI39CTGPfzB-5ymDc",
+  authDomain: "bible-study-app-9c3a7.firebaseapp.com",
+  projectId: "bible-study-app-9c3a7",
+  storageBucket: "bible-study-app-9c3a7.firebasestorage.app",
+  messagingSenderId: "798970345404",
+  appId: "1:798970345404:web:72b492732424abf0161db9"
+};
 
 async function askClaude(system, userMsg) {
   const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -448,8 +449,10 @@ const btnStyle = { background: "rgba(255,255,255,0.2)", border: "none", color: "
 
 function App() {
   const [screen, setScreen] = React.useState("home");
+  const [user, setUser] = React.useState(null);
+  const [authLoading, setAuthLoading] = React.useState(true);
   const [entries, setEntries] = React.useState([]);
-  const [storageLoading, setStorageLoading] = React.useState(true);
+  const [entriesLoading, setEntriesLoading] = React.useState(false);
   const [selected, setSelected] = React.useState(null);
 
   const [title, setTitle] = React.useState("");
@@ -461,20 +464,56 @@ function App() {
   const [editingId, setEditingId] = React.useState(null);
 
   const fileInputRef = React.useRef(null);
+  const fbRef = React.useRef(null);
 
-  // 앱 시작 시 Storage에서 불러오기
+  // Firebase 초기화 + 로그인 상태 감지
   React.useEffect(() => {
-    storageGet(STORAGE_KEY).then(data => {
-      if (Array.isArray(data)) setEntries(data);
-      setStorageLoading(false);
-    }).catch(() => setStorageLoading(false));
+    const { initializeApp } = window.FirebaseApp;
+    const { getFirestore, collection, doc, getDocs, setDoc, deleteDoc, query, orderBy } = window.FirebaseFirestore;
+    const { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } = window.FirebaseAuth;
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    const auth = getAuth(app);
+    const provider = new GoogleAuthProvider();
+
+    fbRef.current = { db, auth, provider, collection, doc, getDocs, setDoc, deleteDoc, query, orderBy, signInWithPopup, signOut };
+
+    onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      setAuthLoading(false);
+    });
   }, []);
 
-  // entries 변경 시 Storage에 저장
+  // 로그인 후 데이터 불러오기
   React.useEffect(() => {
-    if (storageLoading) return;
-    storageSet(STORAGE_KEY, entries);
-  }, [entries, storageLoading]);
+    if (!user) return;
+    loadEntries();
+  }, [user]);
+
+  const loadEntries = async () => {
+    if (!fbRef.current || !user) return;
+    setEntriesLoading(true);
+    const { db, collection, getDocs, query, orderBy } = fbRef.current;
+    try {
+      const q = query(collection(db, "users", user.uid, "entries"), orderBy("date", "desc"));
+      const snap = await getDocs(q);
+      setEntries(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    } catch(e) { console.error(e); }
+    setEntriesLoading(false);
+  };
+
+  const signIn = async () => {
+    const { auth, provider, signInWithPopup } = fbRef.current;
+    await signInWithPopup(auth, provider);
+  };
+
+  const signOutUser = async () => {
+    const { auth, signOut } = fbRef.current;
+    await signOut(auth);
+    setEntries([]);
+    setUser(null);
+  };
 
 
   React.useEffect(() => {
@@ -736,37 +775,33 @@ function App() {
   const allBlocks = pages.flatMap(p => p.blocks || []);
   const isAnalyzing = pages.some(p => p.status === "analyzing");
 
-  const saveEntry = () => {
-    if (!title.trim()) return;
+  const saveEntry = async () => {
+    if (!title.trim() || !user || !fbRef.current) return;
     setSaving(true);
+    const { db, doc, setDoc } = fbRef.current;
 
-    // 이미지 제외, 텍스트 블록만 저장
+    const entryId = editingId || String(Date.now());
     const savedPages = pages.map(p => ({
       pageLabel: p.pageLabel,
-      blocks: (p.blocks || [])
-        .filter(b => b.type === "text")
-        .map(b => ({ type: "text", content: b.content })),
+      blocks: (p.blocks || []).filter(b => b.type === "text").map(b => ({ type: "text", content: b.content })),
     })).filter(p => p.blocks.length > 0);
-
     const allBlocks = savedPages.flatMap(p => p.blocks);
+    const entry = {
+      date: editingId ? (entries.find(e => e.id === editingId)?.date || new Date().toISOString()) : new Date().toISOString(),
+      title, pages: savedPages, allBlocks, questions,
+    };
 
-    if (editingId) {
-      setEntries(prev => prev.map(e => e.id === editingId
-        ? { ...e, title, pages: savedPages, allBlocks, questions }
-        : e));
+    try {
+      await setDoc(doc(db, "users", user.uid, "entries", entryId), entry);
+      await loadEntries();
       setEditingId(null);
-    } else {
-      const entry = {
-        id: Date.now(),
-        date: new Date().toISOString(),
-        title, pages: savedPages, allBlocks, questions,
-      };
-      setEntries(prev => [entry, ...prev]);
+      setTitle(""); setPages([]); setQuestions([{ q: "", a: "" }]);
+      setScreen("home");
+    } catch(e) {
+      console.error(e);
+      alert("저장 중 오류가 발생했어요.");
     }
-
-    setTitle(""); setPages([]); setQuestions([{ q: "", a: "" }]);
     setSaving(false);
-    setScreen("home");
   };
 
   const openEntry = (entry) => {
@@ -783,13 +818,20 @@ function App() {
   };
 
 
-  const deleteEntry = (id) => {
-    setEntries(prev => prev.filter(e => e.id !== id));
-    setScreen("home");
+  const deleteEntry = async (id) => {
+    if (!user || !fbRef.current) return;
+    const { db, doc, deleteDoc } = fbRef.current;
+    try {
+      await deleteDoc(doc(db, "users", user.uid, "entries", String(id)));
+      setEntries(prev => prev.filter(e => e.id !== id));
+      setScreen("home");
+    } catch(e) { console.error(e); }
   };
 
   // 답변만 수정 (보기 화면에서)
-  const updateAnswer = (entryId, qIdx, newAnswer) => {
+  const updateAnswer = async (entryId, qIdx, newAnswer) => {
+    if (!user || !fbRef.current) return;
+    const { db, doc, setDoc } = fbRef.current;
     const updated = entries.map(e => {
       if (e.id !== entryId) return e;
       const filteredQs = e.questions.map((q, i) => ({ q, i })).filter(({ q }) => q.q);
@@ -800,7 +842,13 @@ function App() {
       return { ...e, questions: newQs };
     });
     setEntries(updated);
-    setSelected(updated.find(e => e.id === entryId));
+    const entry = updated.find(e => e.id === entryId);
+    if (entry) {
+      try {
+        await setDoc(doc(db, "users", user.uid, "entries", String(entryId)), entry);
+        setSelected(entry);
+      } catch(e) { console.error(e); }
+    }
   };
 
   // ── STYLES ──
@@ -831,13 +879,28 @@ function App() {
     />
   );
 
-  // ── 스토리지 로딩 ──
-  if (storageLoading) return (
+  // ── 인증 로딩 ──
+  if (authLoading) return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh", background: "#faf6f0" }}>
       <div style={{ textAlign: "center" }}>
         <div style={{ width: 32, height: 32, border: "3px solid #2d4a3e", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.7s linear infinite", margin: "0 auto 16px" }} />
-        <div style={{ color: "#6a9a88", fontFamily: "sans-serif", fontSize: 14 }}>불러오는 중...</div>
+        <div style={{ color: "#6a9a88", fontFamily: "sans-serif", fontSize: 14 }}>로딩 중...</div>
       </div>
+    </div>
+  );
+
+  // ── 로그인 화면 ──
+  if (!user) return (
+    <div style={{ fontFamily: "'Noto Serif KR','Georgia',serif", maxWidth: 430, margin: "0 auto", minHeight: "100vh", background: "#faf6f0", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 32 }}>
+      <div style={{ fontSize: 56, marginBottom: 24 }}>📖</div>
+      <h1 style={{ fontSize: 24, fontWeight: 700, color: "#2d4a3e", marginBottom: 8, textAlign: "center" }}>말씀 묵상 노트</h1>
+      <p style={{ fontSize: 14, color: "#8a7a6a", marginBottom: 48, textAlign: "center", lineHeight: 1.7 }}>구글 계정으로 로그인하면 모든 기기에서 기록을 볼 수 있어요</p>
+      <button
+        onClick={signIn}
+        style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 28px", borderRadius: 14, background: "#fff", border: "1.5px solid #e0d8cc", fontSize: 15, fontWeight: 700, cursor: "pointer", boxShadow: "0 2px 12px rgba(0,0,0,0.08)", color: "#2a1f14" }}>
+        <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" width={22} height={22} alt="Google" />
+        Google로 로그인
+      </button>
     </div>
   );
 
@@ -846,16 +909,20 @@ function App() {
     <div style={s.app}>
       <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@400;700&display=swap" rel="stylesheet" />
       <div style={s.header}>
-        <p style={s.sub}>📖 DAILY BIBLE STUDY</p>
-        <h1 style={s.headerTitle}>말씀 묵상 노트</h1>
-        <p style={{ ...s.sub, marginTop: 8 }}>{entries.length}개의 묵상 기록</p>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+          <div>
+            <p style={s.sub}>📖 DAILY BIBLE STUDY</p>
+            <h1 style={s.headerTitle}>말씀 묵상 노트</h1>
+            <p style={{ ...s.sub, marginTop: 8 }}>{entries.length}개의 묵상 기록</p>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
+            {user.photoURL && <img src={user.photoURL} alt="profile" style={{ width: 34, height: 34, borderRadius: "50%", border: "2px solid rgba(255,255,255,0.3)" }} />}
+            <button onClick={signOutUser} style={{ background: "rgba(255,255,255,0.15)", border: "1px solid rgba(255,255,255,0.3)", color: "#e8dcc8", borderRadius: 8, padding: "4px 10px", fontSize: 11, cursor: "pointer", fontFamily: "sans-serif" }}>로그아웃</button>
+          </div>
+        </div>
       </div>
       <div style={s.body}>
-        <MigrateButton onMigrate={(imported) => setEntries(prev => {
-          const existingIds = new Set(prev.map(e => String(e.id)));
-          const newOnes = imported.filter(e => !existingIds.has(String(e.id)));
-          return [...newOnes, ...prev];
-        })} />
+
         {entries.length === 0 ? (
           <div style={{ textAlign: "center", padding: "60px 0", color: "#9a8a7a" }}>
             <div style={{ fontSize: 48, marginBottom: 16 }}>📝</div>
@@ -1068,8 +1135,7 @@ function App() {
   return null;
 }
 
-// localStorage 기반이므로 마이그레이션 불필요
-function MigrateButton({ onMigrate }) { return null; }
+
 
 // 보기 화면 질문&답변 컴포넌트 (답변 인라인 수정 가능)
 function ViewQuestions({ questions, onSaveAnswer }) {
@@ -1160,7 +1226,19 @@ function PagedView({ pages }) {
   );
 }
 
-    ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+    // Firebase 로드 후 React 마운트
+    function mountApp() {
+      ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App));
+    }
+
+    if (window._firebaseReady) {
+      mountApp();
+    } else {
+      window.addEventListener("firebase-ready", mountApp, { once: true });
+      // 타임아웃 폴백
+      setTimeout(() => { if (!window._appMounted) mountApp(); }, 3000);
+    }
+    window._appMounted = true;
   </script>
 </body>
 </html>
