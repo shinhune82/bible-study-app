@@ -943,6 +943,7 @@ function App() {
         ))}
       </div>
       <button style={s.fab} onClick={() => setScreen("new")}>＋</button>
+      <ImportButton user={user} fbRef={fbRef} onImport={loadEntries} />
     </div>
   );
 
@@ -1137,6 +1138,56 @@ function App() {
 }
 
 
+
+// JSON 파일 가져오기 버튼
+function ImportButton({ user, fbRef, onImport }) {
+  const [importing, setImporting] = React.useState(false);
+  const fileRef = React.useRef(null);
+
+  const handleFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file || !user || !fbRef.current) return;
+    setImporting(true);
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      if (!Array.isArray(data)) throw new Error("잘못된 파일 형식");
+      const { db, doc, setDoc } = fbRef.current;
+      for (const entry of data) {
+        await setDoc(doc(db, "users", user.uid, "entries", String(entry.id)), {
+          date: entry.date || new Date().toISOString(),
+          title: entry.title || "제목 없음",
+          pages: (entry.pages || []).map(p => ({
+            pageLabel: p.pageLabel || "",
+            blocks: (p.blocks || []).filter(b => b.type === "text").map(b => ({ type: "text", content: b.content })),
+          })).filter(p => p.blocks.length > 0),
+          allBlocks: (entry.allBlocks || []).filter(b => b.type === "text"),
+          questions: entry.questions || [],
+        });
+      }
+      await onImport();
+      alert(`✅ ${data.length}개의 기록을 가져왔어요!`);
+    } catch(e) {
+      console.error(e);
+      alert("가져오기 실패. 올바른 JSON 파일인지 확인해주세요.");
+    }
+    setImporting(false);
+    e.target.value = "";
+  };
+
+  return (
+    <>
+      <input ref={fileRef} type="file" accept=".json" style={{ display: "none" }} onChange={handleFile} />
+      <button
+        onClick={() => fileRef.current?.click()}
+        disabled={importing}
+        style={{ position: "fixed", bottom: 28, right: "50%", transform: "translateX(50%) translateX(130px)", width: 46, height: 46, borderRadius: "50%", background: "#fff", border: "2px solid #2d4a3e", color: "#2d4a3e", fontSize: 20, cursor: "pointer", boxShadow: "0 4px 16px rgba(0,0,0,0.12)", display: "flex", alignItems: "center", justifyContent: "center", opacity: importing ? 0.6 : 1 }}
+        title="JSON 파일로 가져오기">
+        {importing ? "⏳" : "📥"}
+      </button>
+    </>
+  );
+}
 
 // localStorage → Firebase 마이그레이션 버튼
 function MigrateButton({ user, fbRef, onMigrate }) {
