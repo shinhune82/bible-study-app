@@ -39,117 +39,13 @@ const firebaseConfig = {
   appId: "1:798970345404:web:72b492732424abf0161db9"
 };
 
-function getApiKey() {
-  return localStorage.getItem("anthropic_api_key") || "";
-}
+// AI 분석은 Claude 아티팩트에서 수행
 
-async function askClaude(system, userMsg) {
-  const apiKey = getApiKey();
-  if (!apiKey) throw new Error("API_KEY_MISSING");
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 1000,
-      system,
-      messages: [{ role: "user", content: userMsg }],
-    }),
-  });
-  return (await res.json()).content?.[0]?.text || "";
-}
 
-async function askClaudeWithImage(base64Image, prompt, maxTokens = 3000) {
-  const apiKey = getApiKey();
-  if (!apiKey) throw new Error("API_KEY_MISSING");
-  const [meta, data] = base64Image.split(",");
-  const mediaType = meta.match(/:(.*?);/)[1];
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: maxTokens,
-      messages: [{
-        role: "user",
-        content: [
-          { type: "image", source: { type: "base64", media_type: mediaType, data } },
-          { type: "text", text: prompt },
-        ],
-      }],
-    }),
-  });
-  return (await res.json()).content?.[0]?.text || "";
-}
 
-function cropRegion(dataUrl, region, naturalW, naturalH) {
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => {
-      const pw = Math.max(1, Math.round(region.w * naturalW));
-      const ph = Math.max(1, Math.round(region.h * naturalH));
-      const canvas = document.createElement("canvas");
-      canvas.width = pw; canvas.height = ph;
-      canvas.getContext("2d").drawImage(img,
-        Math.round(region.x * naturalW), Math.round(region.y * naturalH), pw, ph,
-        0, 0, pw, ph
-      );
-      resolve(canvas.toDataURL("image/jpeg", 0.92));
-    };
-    img.src = dataUrl;
-  });
-}
 
-async function analyzeImageIntoBlocks(base64Image) {
-  const prompt = [
-    "이 이미지는 성경공부 교재 또는 성경 본문 페이지입니다.",
-    "이미지 안의 모든 요소를 위에서 아래 순서대로 분석하여 JSON 배열로 출력하세요.",
-    "",
-    "출력 규칙 (반드시 준수):",
-    "- 응답 전체가 JSON 배열이어야 합니다. [ 로 시작하고 ] 로 끝나야 합니다.",
-    "- 코드블록(backtick 3개) 절대 사용 금지. 마크다운 금지. 설명 문장 금지.",
-    "- [ 앞에 아무 텍스트도 없어야 합니다.",
-    "",
-    "배열 원소 형식:",
-    '텍스트 블록: {"type":"text","content":"줄바꿈은 \\n으로"}',
-    '그림 블록: {"type":"image","label":"그림 한줄 설명","x":0.1,"y":0.2,"w":0.8,"h":0.3}',
-    "  (x,y,w,h = 이미지 전체 크기 대비 0~1 비율 좌표)",
-    "",
-    "추가 규칙:",
-    "- 그림 블록은 손그림·도형·다이어그램·삽화처럼 시각적 요소만 포함",
-    "- 이미지에 그림이 없으면 텍스트 블록만 출력",
-    "- 텍스트는 이미지에 보이는 그대로 정확하게 옮기세요"
-  ].join("\n");
 
-  const raw = await askClaudeWithImage(base64Image, prompt, 3000);
 
-  // 1차 시도: 그대로 파싱
-  try {
-    const clean = raw.replace(/```json|```/g, "").trim();
-    const parsed = JSON.parse(clean);
-    if (Array.isArray(parsed)) return parsed;
-  } catch {}
-
-  // 2차 시도: [ ... ] 구간만 추출
-  try {
-    const match = raw.match(/\[[\s\S]*\]/);
-    if (match) {
-      const parsed = JSON.parse(match[0]);
-      if (Array.isArray(parsed)) return parsed;
-    }
-  } catch {}
-
-  // 3차 폴백: 텍스트만 따로 추출
-  try {
-    const fallbackText = await askClaudeWithImage(base64Image,
-      "이 이미지에서 텍스트만 추출하세요. 설명, 부연, 형식 없이 텍스트만 출력하세요.",
-      2000
-    );
-    return [{ type: "text", content: fallbackText }];
-  } catch {}
-
-  return [{ type: "text", content: "분석에 실패했습니다. 다시 시도해주세요." }];
-}
 
 const formatDate = (iso) => new Date(iso).toLocaleDateString("ko-KR", { month: "long", day: "numeric", weekday: "short" });
 
@@ -457,7 +353,6 @@ const btnStyle = { background: "rgba(255,255,255,0.2)", border: "none", color: "
 
 function App() {
   const [screen, setScreen] = React.useState("home");
-  const [apiKey, setApiKey] = React.useState(() => localStorage.getItem("anthropic_api_key") || "");
   const [user, setUser] = React.useState(null);
   const [authLoading, setAuthLoading] = React.useState(true);
   const [entries, setEntries] = React.useState([]);
@@ -465,14 +360,12 @@ function App() {
   const [selected, setSelected] = React.useState(null);
 
   const [title, setTitle] = React.useState("");
-  const [pages, setPages] = React.useState([]);
+
   const [questions, setQuestions] = React.useState([{ q: "", a: "" }]);
   const [saving, setSaving] = React.useState(false);
 
-  const [cropModal, setCropModal] = React.useState(null);
   const [editingId, setEditingId] = React.useState(null);
 
-  const fileInputRef = React.useRef(null);
   const fbRef = React.useRef(null);
 
   // Firebase 초기화 + 로그인 상태 감지
@@ -532,260 +425,25 @@ function App() {
     return () => document.head.removeChild(style);
   }, []);
 
-  const analyzeOnePage = async (dataUrl, pageId) => {
-    const { naturalW, naturalH } = await new Promise((res) => {
-      const img = new Image();
-      img.onload = () => res({ naturalW: img.naturalWidth, naturalH: img.naturalHeight });
-      img.src = dataUrl;
-    });
+;
 
-    setPages(prev => prev.map(p => p.id === pageId ? { ...p, status: "analyzing" } : p));
 
-    try {
-      const rawBlocks = await analyzeImageIntoBlocks(dataUrl);
-      const enriched = [];
-      for (const block of rawBlocks) {
-        if (block.type === "image" && block.x !== undefined) {
-          const cropped = await cropRegion(dataUrl, block, naturalW, naturalH);
-          enriched.push({ ...block, croppedDataUrl: cropped });
-        } else {
-          enriched.push(block);
-        }
-      }
-      setPages(prev => prev.map(p => p.id === pageId ? { ...p, status: "done", blocks: enriched } : p));
-    } catch {
-      if (err?.message === "API_KEY_MISSING") {
-        alert("⚠️ API 키가 없어요!\n홈 화면 → ⚙️ 설정에서 Anthropic API 키를 입력해주세요.");
-      }
-      setPages(prev => prev.map(p => p.id === pageId ? { ...p, status: "error" } : p));
-    }
-  };
 
-  // 여러 페이지 순차 분석 (병렬 시 rate limit 위험)
-  const analyzePages = async (targetPages) => {
-    for (const page of targetPages) {
-      await analyzeOnePage(page.preview, page.id);
-    }
-  };
 
-  const handleImageFiles = async (files) => {
-    const newPages = [];
-    for (const file of Array.from(files)) {
-      const dataUrl = await new Promise((res) => {
-        const r = new FileReader();
-        r.onload = (e) => res(e.target.result);
-        r.readAsDataURL(file);
-      });
-      const id = Date.now() + Math.random();
-      newPages.push({ id, preview: dataUrl, status: "idle", blocks: [], pageLabel: file.name.replace(/\.[^.]+$/, "") });
-    }
-    setPages(prev => [...prev, ...newPages]);
-  };
 
-  const removePage = (id) => setPages(prev => prev.filter(p => p.id !== id));
-  const movePage = (id, dir) => {
-    setPages(prev => {
-      const idx = prev.findIndex(p => p.id === id);
-      const next = [...prev];
-      const target = idx + dir;
-      if (target < 0 || target >= next.length) return prev;
-      [next[idx], next[target]] = [next[target], next[idx]];
-      return next;
-    });
-  };
 
-  // 블록 수정
-  const updateBlock = (pageId, blockIdx, newContent) => {
-    setPages(prev => prev.map(p => {
-      if (p.id !== pageId) return p;
-      const newBlocks = [...p.blocks];
-      newBlocks[blockIdx] = { ...newBlocks[blockIdx], content: newContent };
-      return { ...p, blocks: newBlocks };
-    }));
-  };
 
-  // 블록 삭제
-  const deleteBlock = (pageId, blockIdx) => {
-    setPages(prev => prev.map(p => {
-      if (p.id !== pageId) return p;
-      return { ...p, blocks: p.blocks.filter((_, i) => i !== blockIdx) };
-    }));
-  };
 
-  // 텍스트 블록 → 이미지 블록으로 전환 (AI가 위치 파악 후 크롭)
-  const convertBlockToImage = async (pageId, blockIdx) => {
-    const page = pages.find(p => p.id === pageId);
-    if (!page) return;
-    const block = page.blocks[blockIdx];
-    if (!block || block.type !== "text") return;
 
-    // 변환 중 표시 (텍스트 블록을 converting 상태로)
-    setPages(prev => prev.map(p => {
-      if (p.id !== pageId) return p;
-      const nb = [...p.blocks];
-      nb[blockIdx] = { ...nb[blockIdx], converting: true };
-      return { ...p, blocks: nb };
-    }));
 
-    try {
-      const { naturalW, naturalH } = await new Promise((res) => {
-        const img = new Image();
-        img.onload = () => res({ naturalW: img.naturalWidth, naturalH: img.naturalHeight });
-        img.src = page.preview;
-      });
 
-      // AI에게 해당 텍스트 내용이 이미지의 어느 위치인지 좌표 요청
-      const [meta, data] = page.preview.split(",");
-      const mediaType = meta.match(/:(.*?);/)[1];
-      const hint = block.content.substring(0, 80).replace(/"/g, "'");
-      const prompt = "이 이미지에서 손그림, 도형, 삽화 영역을 찾아주세요.\n"
-        + "특히 다음 텍스트 근처 또는 해당 위치의 시각적 요소를 찾아주세요: \"" + hint + "\"\n\n"
-        + "해당 시각적 요소의 위치를 이미지 전체 대비 0~1 비율 좌표로 JSON 하나만 출력하세요.\n"
-        + '형식 (설명 없이 JSON만): {"label":"그림 설명","x":0.1,"y":0.2,"w":0.8,"h":0.3}';
-
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 300,
-          messages: [{
-            role: "user",
-            content: [
-              { type: "image", source: { type: "base64", media_type: mediaType, data } },
-              { type: "text", text: prompt },
-            ],
-          }],
-        }),
-      });
-      const raw = (await res.json()).content?.[0]?.text || "";
-
-      let region = null;
-      try {
-        const clean = raw.replace(/```json|```/g, "").trim();
-        // 객체 하나 추출
-        const match = clean.match(/\{[\s\S]*\}/);
-        if (match) region = JSON.parse(match[0]);
-      } catch {}
-
-      if (region && region.x !== undefined) {
-        const cropped = await cropRegion(page.preview, region, naturalW, naturalH);
-        setPages(prev => prev.map(p => {
-          if (p.id !== pageId) return p;
-          const nb = [...p.blocks];
-          nb[blockIdx] = { type: "image", label: region.label || "그림", x: region.x, y: region.y, w: region.w, h: region.h, croppedDataUrl: cropped };
-          return { ...p, blocks: nb };
-        }));
-      } else {
-        // 좌표 못 찾으면 converting 해제
-        setPages(prev => prev.map(p => {
-          if (p.id !== pageId) return p;
-          const nb = [...p.blocks];
-          nb[blockIdx] = { ...nb[blockIdx], converting: false };
-          return { ...p, blocks: nb };
-        }));
-        alert("이미지 영역을 찾지 못했어요. 해당 블록을 삭제하고 원본 이미지를 확인해보세요.");
-      }
-    } catch {
-      setPages(prev => prev.map(p => {
-        if (p.id !== pageId) return p;
-        const nb = [...p.blocks];
-        nb[blockIdx] = { ...nb[blockIdx], converting: false };
-        return { ...p, blocks: nb };
-      }));
-    }
-  };
-
-  // 수동 크롭: 모달 열기
-  const openManualCrop = (pageId, blockIdx) => {
-    const page = pages.find(p => p.id === pageId);
-    if (!page) return;
-    setCropModal({ pageId, blockIdx, imageUrl: page.preview });
-  };
-
-  // 수동 크롭 확정: 선택 영역으로 크롭
-  const confirmManualCrop = async (rect) => {
-    if (!cropModal) return;
-    const { pageId, blockIdx, imageUrl } = cropModal;
-    setCropModal(null);
-
-    const { naturalW, naturalH } = await new Promise((res) => {
-      const img = new Image();
-      img.onload = () => res({ naturalW: img.naturalWidth, naturalH: img.naturalHeight });
-      img.src = imageUrl;
-    });
-
-    setPages(prev => prev.map(p => {
-      if (p.id !== pageId) return p;
-      const nb = [...p.blocks];
-      nb[blockIdx] = { ...nb[blockIdx], retrying: true };
-      return { ...p, blocks: nb };
-    }));
-
-    try {
-      const cropped = await cropRegion(imageUrl, rect, naturalW, naturalH);
-      setPages(prev => prev.map(p => {
-        if (p.id !== pageId) return p;
-        const nb = [...p.blocks];
-        nb[blockIdx] = { ...nb[blockIdx], type: "image", croppedDataUrl: cropped, retrying: false, label: nb[blockIdx].label || "직접 선택" };
-        return { ...p, blocks: nb };
-      }));
-    } catch {
-      setPages(prev => prev.map(p => {
-        if (p.id !== pageId) return p;
-        const nb = [...p.blocks];
-        nb[blockIdx] = { ...nb[blockIdx], retrying: false };
-        return { ...p, blocks: nb };
-      }));
-    }
-  };
-
-  // 이미지 블록 재시도 (크롭 다시)
-  const retryImageBlock = async (pageId, blockIdx) => {
-    const page = pages.find(p => p.id === pageId);
-    if (!page) return;
-    const block = page.blocks[blockIdx];
-    if (!block || block.type !== "image") return;
-
-    // 재시도 중 표시
-    setPages(prev => prev.map(p => {
-      if (p.id !== pageId) return p;
-      const newBlocks = [...p.blocks];
-      newBlocks[blockIdx] = { ...newBlocks[blockIdx], retrying: true, croppedDataUrl: null };
-      return { ...p, blocks: newBlocks };
-    }));
-
-    try {
-      const { naturalW, naturalH } = await new Promise((res) => {
-        const img = new Image();
-        img.onload = () => res({ naturalW: img.naturalWidth, naturalH: img.naturalHeight });
-        img.src = page.preview;
-      });
-      const cropped = await cropRegion(page.preview, block, naturalW, naturalH);
-      setPages(prev => prev.map(p => {
-        if (p.id !== pageId) return p;
-        const newBlocks = [...p.blocks];
-        newBlocks[blockIdx] = { ...newBlocks[blockIdx], retrying: false, croppedDataUrl: cropped };
-        return { ...p, blocks: newBlocks };
-      }));
-    } catch {
-      setPages(prev => prev.map(p => {
-        if (p.id !== pageId) return p;
-        const newBlocks = [...p.blocks];
-        newBlocks[blockIdx] = { ...newBlocks[blockIdx], retrying: false };
-        return { ...p, blocks: newBlocks };
-      }));
-    }
-  };
 
   const addQuestion = () => setQuestions([...questions, { q: "", a: "" }]);
   const updateQ = (i, field, val) => {
     const updated = [...questions]; updated[i] = { ...updated[i], [field]: val }; setQuestions(updated);
   };
 
-  // 전체 블록 합산 (페이지 순서대로)
-  const allBlocks = pages.flatMap(p => p.blocks || []);
-  const isAnalyzing = pages.some(p => p.status === "analyzing");
+
 
   const saveEntry = async () => {
     if (!title.trim() || !user || !fbRef.current) return;
@@ -793,21 +451,20 @@ function App() {
     const { db, doc, setDoc } = fbRef.current;
 
     const entryId = editingId || String(Date.now());
-    const savedPages = pages.map(p => ({
-      pageLabel: p.pageLabel,
-      blocks: (p.blocks || []).filter(b => b.type === "text").map(b => ({ type: "text", content: b.content })),
-    })).filter(p => p.blocks.length > 0);
-    const allBlocks = savedPages.flatMap(p => p.blocks);
+    const existingEntry = entries.find(e => e.id === editingId);
     const entry = {
-      date: editingId ? (entries.find(e => e.id === editingId)?.date || new Date().toISOString()) : new Date().toISOString(),
-      title, pages: savedPages, allBlocks, questions,
+      date: editingId ? (existingEntry?.date || new Date().toISOString()) : new Date().toISOString(),
+      title,
+      pages: existingEntry?.pages || [],
+      allBlocks: existingEntry?.allBlocks || [],
+      questions,
     };
 
     try {
       await setDoc(doc(db, "users", user.uid, "entries", entryId), entry);
       await loadEntries();
       setEditingId(null);
-      setTitle(""); setPages([]); setQuestions([{ q: "", a: "" }]);
+      setTitle(""); setQuestions([{ q: "", a: "" }]);
       setScreen("home");
     } catch(e) {
       console.error(e);
@@ -824,7 +481,6 @@ function App() {
   const openEditEntry = (entry) => {
     setEditingId(entry.id);
     setTitle(entry.title);
-    setPages((entry.pages || []).map(p => ({ ...p, id: Date.now() + Math.random(), status: "done" })));
     setQuestions(entry.questions?.length ? entry.questions : [{ q: "", a: "" }]);
     setScreen("new");
   };
@@ -881,15 +537,6 @@ function App() {
     addQBtn: { width: "100%", padding: 12, borderRadius: 10, border: "1.5px dashed #c8b89a", background: "transparent", color: "#7a6a55", fontSize: 14, cursor: "pointer", fontFamily: "'Noto Serif KR',serif" },
     qCard: { background: "#fdf8f2", border: "1px solid #ede5d8", borderRadius: 12, padding: 16, marginBottom: 12 },
   };
-
-  // ── MANUAL CROP MODAL ──
-  if (cropModal) return (
-    <ManualCropModal
-      imageUrl={cropModal.imageUrl}
-      onConfirm={confirmManualCrop}
-      onCancel={() => setCropModal(null)}
-    />
-  );
 
   // ── 인증 로딩 ──
   if (authLoading) return (
@@ -985,103 +632,8 @@ function App() {
           <input style={s.input} value={title} onChange={e => setTitle(e.target.value)} placeholder="오늘의 말씀 주제" />
         </div>
 
-        {/* 이미지 업로드 + 분석 */}
-        <div style={s.section}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-            <label style={{ ...s.label, margin: 0 }}>📷 본문 사진</label>
-            {pages.length > 0 && (
-              <span style={{ fontSize: 11, color: "#6a9a88", fontFamily: "sans-serif" }}>
-                {pages.length}장 · {isAnalyzing ? "분석 중..." : "완료"}
-              </span>
-            )}
-          </div>
 
-          {/* 페이지 카드들 */}
-          {pages.map((page, idx) => (
-            <ImageCard
-              key={page.id}
-              imgData={page}
-              index={idx}
-              isFirst={idx === 0}
-              isLast={idx === pages.length - 1}
-              onRemove={() => removePage(page.id)}
-              onMoveUp={() => movePage(page.id, -1)}
-              onMoveDown={() => movePage(page.id, 1)}
-              onUpdateBlock={(blockIdx, val) => updateBlock(page.id, blockIdx, val)}
-              onDeleteBlock={(blockIdx) => deleteBlock(page.id, blockIdx)}
-              onRetryImage={(blockIdx) => retryImageBlock(page.id, blockIdx)}
-              onConvertToImage={(blockIdx) => convertBlockToImage(page.id, blockIdx)}
-              onManualCrop={(blockIdx) => openManualCrop(page.id, blockIdx)}
-              onReanalyze={() => analyzeOnePage(page.preview, page.id)}
-            />
-          ))}
-
-          {/* 사진 추가 버튼 */}
-          <div
-            onClick={() => fileInputRef.current?.click()}
-            style={{ border: "2px dashed #c8b89a", borderRadius: 12, padding: "20px 16px", textAlign: "center", cursor: "pointer", background: "#fdf8f2", color: "#a89a88" }}>
-            <div style={{ fontSize: 28 }}>📷</div>
-            <div style={{ fontSize: 13, marginTop: 6 }}>
-              {pages.length === 0 ? "사진을 추가하세요 (여러 장 가능)" : "+ 사진 추가"}
-            </div>
-            <div style={{ fontSize: 11, marginTop: 4, color: "#c0b0a0" }}>여러 장 동시 선택 가능</div>
-          </div>
-          <input
-            ref={fileInputRef} type="file" accept="image/*" multiple
-            style={{ display: "none" }}
-            onChange={e => { handleImageFiles(e.target.files); e.target.value = ""; }}
-          />
-
-          {/* AI 분석 시작 / 재시도 버튼 */}
-          {(() => {
-            const pendingPages = pages.filter(p => p.status === "idle" || p.status === "error");
-            const errorPages = pages.filter(p => p.status === "error");
-            if (isAnalyzing) return (
-              <div style={{ marginTop: 10, textAlign: "center", fontSize: 12, color: "#6a9a88", fontFamily: "sans-serif" }}>
-                <div style={{ width: 16, height: 16, border: "2px solid #6a9a88", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.7s linear infinite", display: "inline-block", marginRight: 6, verticalAlign: "middle" }} />
-                {pages.filter(p => p.status === "done").length} / {pages.length} 페이지 분석 중...
-              </div>
-            );
-            if (pendingPages.length === 0) return null;
-            return (
-              <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
-                {pendingPages.length > 0 && (
-                  <button
-                    onClick={() => analyzePages(pendingPages)}
-                    style={{
-                      width: "100%", padding: "14px", borderRadius: 12,
-                      background: errorPages.length > 0 ? "linear-gradient(135deg,#7a2d2d,#b85050)" : "linear-gradient(135deg,#2d4a3e,#4a7c68)",
-                      color: "#fff", border: "none", fontSize: 15, fontWeight: 700,
-                      cursor: "pointer", fontFamily: "'Noto Serif KR',serif",
-                      boxShadow: "0 4px 14px rgba(45,74,62,0.35)",
-                      display: "flex", alignItems: "center", justifyContent: "center", gap: 8
-                    }}>
-                    {errorPages.length > 0
-                      ? ("🔄 실패한 " + errorPages.length + "장 재시도")
-                      : ("✨ " + pendingPages.length + "장 AI 분석 시작")}
-                  </button>
-                )}
-                {errorPages.length > 0 && pages.filter(p => p.status === "idle").length > 0 && (
-                  <div style={{ fontSize: 11, color: "#c07070", textAlign: "center", fontFamily: "sans-serif" }}>
-                    ⚠️ {errorPages.length}장 실패 포함 — 전체 재시도
-                  </div>
-                )}
-              </div>
-            );
-          })()}
-        </div>
-
-        {/* 분석 완료된 전체 본문 미리보기 */}
-        {allBlocks.length > 0 && !isAnalyzing && (
-          <div style={{ ...s.section, animation: "fadeIn 0.4s ease" }}>
-            <label style={s.label}>📄 분석된 본문 전체 ({pages.length}페이지 합산)</label>
-            <div style={{ background: "#fff", border: "1px solid #e0d8cc", borderRadius: 12, padding: 14 }}>
-              <BlockViewer blocks={allBlocks} />
-            </div>
-          </div>
-        )}
-
-        {/* 묵상 질문 */}
+                {/* 묵상 질문 */}
         <div style={s.section}>
           <label style={s.label}>묵상 질문 & 답변</label>
           {questions.map((q, i) => (
@@ -1095,10 +647,10 @@ function App() {
         </div>
 
         <button
-          style={{ ...s.saveBtn, opacity: saving || isAnalyzing ? 0.6 : 1 }}
+          style={{ ...s.saveBtn, opacity: saving ? 0.6 : 1 }}
           onClick={saveEntry}
-          disabled={saving || isAnalyzing || !title.trim()}>
-          {isAnalyzing ? "⏳ 분석 완료 후 저장 가능" : saving ? "저장 중..." : editingId ? "✅ 수정 완료" : "💾 묵상 저장하기"}
+          disabled={saving || !title.trim()}>
+          {saving ? "저장 중..." : editingId ? "✅ 수정 완료" : "💾 묵상 저장하기"}
         </button>
       </div>
     </div>
@@ -1167,36 +719,18 @@ function App() {
       </div>
       <div style={s.body}>
         <div style={{ background: "#fff", border: "1px solid #e0d8cc", borderRadius: 14, padding: 20, marginBottom: 16 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: "#2d4a3e", marginBottom: 6, fontFamily: "sans-serif" }}>🔑 Anthropic API 키</div>
-          <div style={{ fontSize: 12, color: "#8a7a6a", fontFamily: "sans-serif", marginBottom: 12, lineHeight: 1.6 }}>
-            AI 분석 기능을 사용하려면 API 키가 필요해요.<br/>
-            <a href="https://console.anthropic.com" target="_blank" style={{ color: "#4a7c68" }}>console.anthropic.com</a> 에서 발급받으세요.
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#2d4a3e", marginBottom: 8, fontFamily: "sans-serif" }}>ℹ️ 이 앱에 대해</div>
+          <div style={{ fontSize: 13, color: "#5a4a3a", fontFamily: "sans-serif", lineHeight: 1.8 }}>
+            <p style={{ margin: "0 0 8px" }}>📖 말씀 묵상 노트는 Claude AI 아티팩트에서 작성하고, 이 앱에서 확인하는 방식으로 사용해요.</p>
+            <p style={{ margin: "0 0 8px" }}>✏️ <strong>작성/분석</strong>: Claude.ai 아티팩트</p>
+            <p style={{ margin: 0 }}>👀 <strong>확인/답변</strong>: 이 앱 (모든 기기)</p>
           </div>
-          <input
-            type="password"
-            value={apiKey}
-            onChange={e => setApiKey(e.target.value)}
-            placeholder="sk-ant-..."
-            style={{ ...s.input, marginBottom: 10, fontFamily: "monospace", fontSize: 13 }}
-          />
-          <button
-            onClick={() => {
-              localStorage.setItem("anthropic_api_key", apiKey);
-              alert("✅ API 키가 저장됐어요!");
-            }}
-            style={{ ...s.saveBtn, fontSize: 14, padding: 12 }}>
-            저장
-          </button>
-          {apiKey && (
-            <button
-              onClick={() => { localStorage.removeItem("anthropic_api_key"); setApiKey(""); alert("API 키가 삭제됐어요."); }}
-              style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid #e8a09a", background: "transparent", color: "#c0392b", fontSize: 13, cursor: "pointer", fontFamily: "sans-serif", marginTop: 8 }}>
-              키 삭제
-            </button>
-          )}
         </div>
-        <div style={{ fontSize: 11, color: "#a89a88", fontFamily: "sans-serif", lineHeight: 1.7, padding: "0 4px" }}>
-          💡 API 키는 이 기기의 브라우저에만 저장돼요. 서버로 전송되지 않아요.
+        <div style={{ background: "#fff", border: "1px solid #e0d8cc", borderRadius: 14, padding: 20 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#c0392b", marginBottom: 8, fontFamily: "sans-serif" }}>🗑️ 계정</div>
+          <button onClick={signOutUser} style={{ width: "100%", padding: 12, borderRadius: 10, border: "1px solid #e8a09a", background: "transparent", color: "#c0392b", fontSize: 13, cursor: "pointer", fontFamily: "sans-serif" }}>
+            로그아웃
+          </button>
         </div>
       </div>
     </div>
