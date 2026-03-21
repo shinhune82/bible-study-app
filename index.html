@@ -605,7 +605,7 @@ function App() {
         ))}
       </div>
       {/* FAB 버튼 그룹 - 세로 스택 */}
-      <div style={{ position: "fixed", bottom: 24, right: "50%", transform: "translateX(215px)", display: "flex", flexDirection: "column", gap: 10, alignItems: "center" }}>
+      <div style={{ position: "fixed", bottom: 24, right: 20, display: "flex", flexDirection: "column", gap: 10, alignItems: "center" }}>
         <ImportButton user={user} fbRef={fbRef} onImport={loadEntries} />
         <button style={s.fab} onClick={() => setScreen("new")}>＋</button>
       </div>
