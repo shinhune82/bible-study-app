@@ -39,10 +39,16 @@ const firebaseConfig = {
   appId: "1:798970345404:web:72b492732424abf0161db9"
 };
 
+function getApiKey() {
+  return localStorage.getItem("anthropic_api_key") || "";
+}
+
 async function askClaude(system, userMsg) {
+  const apiKey = getApiKey();
+  if (!apiKey) throw new Error("API_KEY_MISSING");
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
     body: JSON.stringify({
       model: "claude-sonnet-4-20250514",
       max_tokens: 1000,
@@ -54,11 +60,13 @@ async function askClaude(system, userMsg) {
 }
 
 async function askClaudeWithImage(base64Image, prompt, maxTokens = 3000) {
+  const apiKey = getApiKey();
+  if (!apiKey) throw new Error("API_KEY_MISSING");
   const [meta, data] = base64Image.split(",");
   const mediaType = meta.match(/:(.*?);/)[1];
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
     body: JSON.stringify({
       model: "claude-sonnet-4-20250514",
       max_tokens: maxTokens,
@@ -449,6 +457,7 @@ const btnStyle = { background: "rgba(255,255,255,0.2)", border: "none", color: "
 
 function App() {
   const [screen, setScreen] = React.useState("home");
+  const [apiKey, setApiKey] = React.useState(() => localStorage.getItem("anthropic_api_key") || "");
   const [user, setUser] = React.useState(null);
   const [authLoading, setAuthLoading] = React.useState(true);
   const [entries, setEntries] = React.useState([]);
@@ -545,6 +554,9 @@ function App() {
       }
       setPages(prev => prev.map(p => p.id === pageId ? { ...p, status: "done", blocks: enriched } : p));
     } catch {
+      if (err?.message === "API_KEY_MISSING") {
+        alert("⚠️ API 키가 없어요!\n홈 화면 → ⚙️ 설정에서 Anthropic API 키를 입력해주세요.");
+      }
       setPages(prev => prev.map(p => p.id === pageId ? { ...p, status: "error" } : p));
     }
   };
@@ -859,7 +871,7 @@ function App() {
     sub: { fontSize: 12, opacity: 0.65, marginTop: 4, fontFamily: "sans-serif" },
     body: { padding: "20px 20px 100px" },
     card: { background: "#fff", borderRadius: 16, padding: 18, marginBottom: 12, boxShadow: "0 2px 12px rgba(0,0,0,0.07)", cursor: "pointer", border: "1px solid #f0ebe3" },
-    fab: { position: "fixed", bottom: 28, right: "50%", transform: "translateX(50%) translateX(185px)", width: 56, height: 56, borderRadius: "50%", background: "linear-gradient(135deg,#2d4a3e,#4a7c68)", color: "#fff", fontSize: 28, border: "none", cursor: "pointer", boxShadow: "0 4px 20px rgba(45,74,62,0.45)", display: "flex", alignItems: "center", justifyContent: "center" },
+    fab: { width: 56, height: 56, borderRadius: "50%", background: "linear-gradient(135deg,#2d4a3e,#4a7c68)", color: "#fff", fontSize: 28, border: "none", cursor: "pointer", boxShadow: "0 4px 20px rgba(45,74,62,0.45)", display: "flex", alignItems: "center", justifyContent: "center" },
     backBtn: { background: "none", border: "none", color: "#e8dcc8", fontSize: 22, cursor: "pointer", padding: "4px 8px 4px 0" },
     label: { fontSize: 12, fontWeight: 700, color: "#5a4a3a", fontFamily: "sans-serif", marginBottom: 6, display: "block", textTransform: "uppercase", letterSpacing: "0.8px" },
     input: { width: "100%", border: "1.5px solid #e8e0d5", borderRadius: 10, padding: "12px 14px", fontSize: 15, background: "#fdfbf8", fontFamily: "'Noto Serif KR',serif", boxSizing: "border-box", outline: "none", color: "#2a1f14" },
@@ -917,7 +929,10 @@ function App() {
           </div>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
             {user.photoURL && <img src={user.photoURL} alt="profile" style={{ width: 34, height: 34, borderRadius: "50%", border: "2px solid rgba(255,255,255,0.3)" }} />}
-            <button onClick={signOutUser} style={{ background: "rgba(255,255,255,0.15)", border: "1px solid rgba(255,255,255,0.3)", color: "#e8dcc8", borderRadius: 8, padding: "4px 10px", fontSize: 11, cursor: "pointer", fontFamily: "sans-serif" }}>로그아웃</button>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button onClick={() => setScreen("settings")} style={{ background: "rgba(255,255,255,0.15)", border: "1px solid rgba(255,255,255,0.3)", color: "#e8dcc8", borderRadius: 8, padding: "4px 10px", fontSize: 11, cursor: "pointer", fontFamily: "sans-serif" }}>⚙️ 설정</button>
+              <button onClick={signOutUser} style={{ background: "rgba(255,255,255,0.15)", border: "1px solid rgba(255,255,255,0.3)", color: "#e8dcc8", borderRadius: 8, padding: "4px 10px", fontSize: 11, cursor: "pointer", fontFamily: "sans-serif" }}>로그아웃</button>
+            </div>
           </div>
         </div>
       </div>
@@ -942,8 +957,11 @@ function App() {
           </div>
         ))}
       </div>
-      <button style={s.fab} onClick={() => setScreen("new")}>＋</button>
-      <ImportButton user={user} fbRef={fbRef} onImport={loadEntries} />
+      {/* FAB 버튼 그룹 - 세로 스택 */}
+      <div style={{ position: "fixed", bottom: 24, right: "50%", transform: "translateX(215px)", display: "flex", flexDirection: "column", gap: 10, alignItems: "center" }}>
+        <ImportButton user={user} fbRef={fbRef} onImport={loadEntries} />
+        <button style={s.fab} onClick={() => setScreen("new")}>＋</button>
+      </div>
     </div>
   );
 
@@ -1134,6 +1152,56 @@ function App() {
     </div>
   );
 
+  // ── SETTINGS ──
+  if (screen === "settings") return (
+    <div style={s.app}>
+      <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@400;700&display=swap" rel="stylesheet" />
+      <div style={s.header}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <button style={s.backBtn} onClick={() => setScreen("home")}>←</button>
+          <div>
+            <p style={s.sub}>⚙️ SETTINGS</p>
+            <h1 style={s.headerTitle}>설정</h1>
+          </div>
+        </div>
+      </div>
+      <div style={s.body}>
+        <div style={{ background: "#fff", border: "1px solid #e0d8cc", borderRadius: 14, padding: 20, marginBottom: 16 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#2d4a3e", marginBottom: 6, fontFamily: "sans-serif" }}>🔑 Anthropic API 키</div>
+          <div style={{ fontSize: 12, color: "#8a7a6a", fontFamily: "sans-serif", marginBottom: 12, lineHeight: 1.6 }}>
+            AI 분석 기능을 사용하려면 API 키가 필요해요.<br/>
+            <a href="https://console.anthropic.com" target="_blank" style={{ color: "#4a7c68" }}>console.anthropic.com</a> 에서 발급받으세요.
+          </div>
+          <input
+            type="password"
+            value={apiKey}
+            onChange={e => setApiKey(e.target.value)}
+            placeholder="sk-ant-..."
+            style={{ ...s.input, marginBottom: 10, fontFamily: "monospace", fontSize: 13 }}
+          />
+          <button
+            onClick={() => {
+              localStorage.setItem("anthropic_api_key", apiKey);
+              alert("✅ API 키가 저장됐어요!");
+            }}
+            style={{ ...s.saveBtn, fontSize: 14, padding: 12 }}>
+            저장
+          </button>
+          {apiKey && (
+            <button
+              onClick={() => { localStorage.removeItem("anthropic_api_key"); setApiKey(""); alert("API 키가 삭제됐어요."); }}
+              style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid #e8a09a", background: "transparent", color: "#c0392b", fontSize: 13, cursor: "pointer", fontFamily: "sans-serif", marginTop: 8 }}>
+              키 삭제
+            </button>
+          )}
+        </div>
+        <div style={{ fontSize: 11, color: "#a89a88", fontFamily: "sans-serif", lineHeight: 1.7, padding: "0 4px" }}>
+          💡 API 키는 이 기기의 브라우저에만 저장돼요. 서버로 전송되지 않아요.
+        </div>
+      </div>
+    </div>
+  );
+
   return null;
 }
 
@@ -1181,7 +1249,7 @@ function ImportButton({ user, fbRef, onImport }) {
       <button
         onClick={() => fileRef.current?.click()}
         disabled={importing}
-        style={{ position: "fixed", bottom: 28, right: "50%", transform: "translateX(50%) translateX(130px)", width: 46, height: 46, borderRadius: "50%", background: "#fff", border: "2px solid #2d4a3e", color: "#2d4a3e", fontSize: 20, cursor: "pointer", boxShadow: "0 4px 16px rgba(0,0,0,0.12)", display: "flex", alignItems: "center", justifyContent: "center", opacity: importing ? 0.6 : 1 }}
+        style={{ width: 46, height: 46, borderRadius: "50%", background: "#fff", border: "2px solid #2d4a3e", color: "#2d4a3e", fontSize: 20, cursor: "pointer", boxShadow: "0 4px 16px rgba(0,0,0,0.12)", display: "flex", alignItems: "center", justifyContent: "center", opacity: importing ? 0.6 : 1 }}
         title="JSON 파일로 가져오기">
         {importing ? "⏳" : "📥"}
       </button>
