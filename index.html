@@ -676,15 +676,13 @@ function App() {
       </div>
       <div style={s.body}>
 
-        {/* 페이지 탭이 여러 개면 탭 형태로 */}
-        {selected.pages?.length > 1 ? (
-          <PagedView pages={selected.pages} />
-        ) : selected.allBlocks?.length > 0 ? (
+        {/* 본문 - 페이지 구분 없이 전체 연결 */}
+        {selected.allBlocks?.length > 0 && (
           <div style={{ marginBottom: 20 }}>
             <div style={{ fontSize: 11, color: "#8a7a6a", fontFamily: "sans-serif", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: 10 }}>본문</div>
             <BlockViewer blocks={selected.allBlocks} />
           </div>
-        ) : null}
+        )}
 
         {/* 묵상 질문 & 답변 (보기/수정) */}
         {selected.questions?.filter(q => q.q).length > 0 && (
