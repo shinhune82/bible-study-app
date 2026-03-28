@@ -167,15 +167,71 @@ function ManualCropModal({ imageUrl, onConfirm, onCancel }) {
   );
 }
 
+// HTML → 텍스트 변환 유틸
+function htmlToPlain(html) {
+  const d = document.createElement("div");
+  d.innerHTML = html;
+  return d.innerText || d.textContent || "";
+}
+
+// 서식 툴바 컴포넌트
+function FormatToolbar({ editRef, onSave, onCancel }) {
+  const COLORS = [
+    { label: "기본", value: "#2a1f14" },
+    { label: "빨강", value: "#c0392b" },
+    { label: "파랑", value: "#2471a3" },
+    { label: "초록", value: "#1e8449" },
+    { label: "주황", value: "#d35400" },
+    { label: "보라", value: "#7d3c98" },
+  ];
+
+  const applyFormat = (cmd, value = null) => {
+    editRef.current?.focus();
+    document.execCommand(cmd, false, value);
+  };
+
+  const btnStyle = {
+    background: "#fff", border: "1px solid #d0c8bc", borderRadius: 6,
+    padding: "4px 8px", fontSize: 12, cursor: "pointer", fontFamily: "sans-serif",
+    color: "#2a1f14", lineHeight: 1,
+  };
+
+  return (
+    <div style={{ background: "#f0ece4", borderBottom: "1px solid #e0d8cc", padding: "6px 10px", display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center" }}>
+      <button style={{ ...btnStyle, fontWeight: 700 }} onMouseDown={e => { e.preventDefault(); applyFormat("bold"); }} title="볼드">B</button>
+      <button style={{ ...btnStyle, fontStyle: "italic" }} onMouseDown={e => { e.preventDefault(); applyFormat("italic"); }} title="기울임">I</button>
+      <button style={{ ...btnStyle, textDecoration: "underline" }} onMouseDown={e => { e.preventDefault(); applyFormat("underline"); }} title="밑줄">U</button>
+      <div style={{ width: 1, height: 20, background: "#d0c8bc", margin: "0 2px" }} />
+      {COLORS.map(c => (
+        <button
+          key={c.value}
+          title={c.label}
+          onMouseDown={e => { e.preventDefault(); applyFormat("foreColor", c.value); }}
+          style={{ width: 20, height: 20, borderRadius: "50%", background: c.value, border: c.value === "#2a1f14" ? "2px solid #999" : "2px solid transparent", cursor: "pointer", padding: 0 }}
+        />
+      ))}
+      <div style={{ width: 1, height: 20, background: "#d0c8bc", margin: "0 2px" }} />
+      <button style={{ ...btnStyle, fontSize: 11 }} onMouseDown={e => { e.preventDefault(); applyFormat("removeFormat"); }} title="서식 제거">✕서식</button>
+      <div style={{ flex: 1 }} />
+      <button style={{ ...btnStyle, background: "#2d4a3e", color: "#fff", border: "none", fontWeight: 700 }} onMouseDown={e => { e.preventDefault(); onSave(); }}>✅ 저장</button>
+      <button style={{ ...btnStyle }} onMouseDown={e => { e.preventDefault(); onCancel(); }}>취소</button>
+    </div>
+  );
+}
+
 // 블록 렌더러 (편집 모드 지원)
 function BlockViewer({ blocks, editable = false, onUpdate, onDelete, onRetryImage, onConvertToImage, onManualCrop }) {
   const [editingIdx, setEditingIdx] = React.useState(null);
-  const [editValue, setEditValue] = React.useState("");
+  const editRef = React.useRef(null);
 
   if (!blocks?.length) return null;
 
-  const startEdit = (i, content) => { setEditingIdx(i); setEditValue(content); };
-  const confirmEdit = (i) => { onUpdate(i, editValue); setEditingIdx(null); };
+  const startEdit = (i) => setEditingIdx(i);
+  const confirmEdit = (i) => {
+    const html = editRef.current?.innerHTML || "";
+    onUpdate(i, html);
+    setEditingIdx(null);
+  };
   const cancelEdit = () => setEditingIdx(null);
 
   const hdr = { display: "flex", alignItems: "center", justifyContent: "space-between" };
@@ -185,6 +241,9 @@ function BlockViewer({ blocks, editable = false, onUpdate, onDelete, onRetryImag
     fontFamily: "sans-serif", lineHeight: 1,
   });
 
+  // HTML 렌더링 여부 판단 (태그 포함 시 HTML로)
+  const isHtml = (str) => /<[a-z][\s\S]*>/i.test(str || "");
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       {blocks.map((block, i) => {
@@ -192,28 +251,20 @@ function BlockViewer({ blocks, editable = false, onUpdate, onDelete, onRetryImag
           const isEditing = editingIdx === i;
           return (
             <div key={i} style={{ background: "#fdfbf8", border: `1.5px solid ${isEditing ? "#4a7c68" : "#e0d8cc"}`, borderRadius: 10, overflow: "hidden" }}>
-              {editable && (
+              {editable && !isEditing && (
                 <div style={{ ...hdr, background: "#f5f0e8", padding: "5px 10px", borderBottom: "1px solid #e8e0d5" }}>
                   <span style={{ fontSize: 10, color: "#8a7a6a", fontFamily: "sans-serif" }}>📝 텍스트</span>
                   <div style={{ display: "flex", gap: 2, alignItems: "center" }}>
-                    {!isEditing
-                      ? <button style={iconBtn("#4a7c68")} onClick={() => startEdit(i, block.content)} title="수정">✏️</button>
-                      : <>
-                          <button style={iconBtn("#4a7c68")} onClick={() => confirmEdit(i)} title="저장">✅</button>
-                          <button style={iconBtn("#999")} onClick={cancelEdit} title="취소">↩️</button>
-                        </>
-                    }
-                    {!isEditing && onConvertToImage && (
-                      <button
-                        style={{ ...iconBtn("#8a6a2a"), fontSize: 10, background: "#f4ece0", borderRadius: 4, padding: "2px 6px" }}
-                        onClick={() => onConvertToImage(i)}
-                        title="이미지로 전환">
-                        🎨 그림
-                      </button>
+                    <button style={iconBtn("#4a7c68")} onClick={() => startEdit(i)} title="수정">✏️</button>
+                    {onConvertToImage && (
+                      <button style={{ ...iconBtn("#8a6a2a"), fontSize: 10, background: "#f4ece0", borderRadius: 4, padding: "2px 6px" }} onClick={() => onConvertToImage(i)} title="이미지로 전환">🎨 그림</button>
                     )}
                     {onDelete && <button style={iconBtn("#c0392b")} onClick={() => onDelete(i)} title="삭제">🗑️</button>}
                   </div>
                 </div>
+              )}
+              {isEditing && (
+                <FormatToolbar editRef={editRef} onSave={() => confirmEdit(i)} onCancel={cancelEdit} />
               )}
               {block.converting
                 ? <div style={{ padding: "20px", textAlign: "center" }}>
@@ -221,15 +272,19 @@ function BlockViewer({ blocks, editable = false, onUpdate, onDelete, onRetryImag
                     <div style={{ fontSize: 11, color: "#8a6a2a", fontFamily: "sans-serif" }}>그림 영역 찾는 중...</div>
                   </div>
                 : isEditing
-                  ? <textarea
-                      autoFocus
-                      value={editValue}
-                      onChange={e => setEditValue(e.target.value)}
-                      style={{ width: "100%", minHeight: 100, padding: "12px 14px", fontSize: 13, lineHeight: 1.85, border: "none", outline: "none", resize: "vertical", fontFamily: "'Noto Serif KR',serif", background: "#fafff8", boxSizing: "border-box", color: "#2a1f14" }}
+                  ? <div
+                      ref={editRef}
+                      contentEditable={true}
+                      suppressContentEditableWarning={true}
+                      dangerouslySetInnerHTML={{ __html: isHtml(block.content) ? block.content : block.content?.replace(/
+/g, "<br/>") }}
+                      style={{ padding: "12px 14px", fontSize: 13, lineHeight: 1.85, border: "none", outline: "none", minHeight: 100, fontFamily: "'Noto Serif KR',serif", background: "#fafff8", color: "#2a1f14" }}
                     />
-                  : <div style={{ padding: "12px 14px", fontSize: 13, lineHeight: 1.85, color: "#2a1f14", whiteSpace: "pre-wrap", fontFamily: "'Noto Serif KR',serif" }}>
-                      {block.content}
-                    </div>
+                  : isHtml(block.content)
+                    ? <div style={{ padding: "12px 14px", fontSize: 13, lineHeight: 1.85, color: "#2a1f14", fontFamily: "'Noto Serif KR',serif" }} dangerouslySetInnerHTML={{ __html: block.content }} />
+                    : <div style={{ padding: "12px 14px", fontSize: 13, lineHeight: 1.85, color: "#2a1f14", whiteSpace: "pre-wrap", fontFamily: "'Noto Serif KR',serif" }}>
+                        {block.content}
+                      </div>
               }
             </div>
           );
@@ -522,6 +577,27 @@ function App() {
     } catch(e) { console.error(e); }
   };
 
+  // 본문 블록 삭제 (보기 화면에서)
+  const deleteBlock = async (blockIdx) => {
+    if (!user || !fbRef.current || !selected) return;
+    const { db, doc, setDoc } = fbRef.current;
+    const newBlocks = (selected.allBlocks || []).filter((_, i) => i !== blockIdx);
+
+    let offset = 0;
+    const newPages = (selected.pages || []).map(p => {
+      const pBlocks = (p.blocks || []).filter((_, i) => (offset + i) !== blockIdx);
+      offset += p.blocks?.length || 0;
+      return { ...p, blocks: pBlocks };
+    });
+
+    const updated = { ...selected, allBlocks: newBlocks, pages: newPages };
+    setSelected(updated);
+    setEntries(prev => prev.map(e => e.id === selected.id ? updated : e));
+    try {
+      await setDoc(doc(db, "users", user.uid, "entries", String(selected.id)), updated);
+    } catch(e) { console.error(e); }
+  };
+
   // 답변만 수정 (보기 화면에서)
   const updateAnswer = async (entryId, qIdx, newAnswer) => {
     if (!user || !fbRef.current) return;
@@ -710,7 +786,7 @@ function App() {
               blocks={selected.allBlocks}
               editable={true}
               onUpdate={(idx, val) => updateBlock(idx, val)}
-              onDelete={null}
+              onDelete={(idx) => deleteBlock(idx)}
               onRetryImage={null}
               onConvertToImage={null}
               onManualCrop={null}
